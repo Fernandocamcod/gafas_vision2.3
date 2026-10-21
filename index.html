@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-950">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <title>NavVision - Asistente Accesible de Orientación y Rastreo GPS</title>
+
+  <meta name="theme-color" content="#FACC15">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NavVision">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link id="manifestLink" rel="manifest">
+  <link id="appleIcon" rel="apple-touch-icon">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              yellow: '#FACC15',
+              green: '#22C55E',
+              blue: '#3B82F6',
+              red: '#EF4444',
+              dark: '#090D16',
+              card: '#131B2E'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .btn-giant {
+      min-height: 84px;
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 0.025em;
+      border-width: 3px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6);
+      transition: all 0.15s ease-in-out;
+    }
+    .btn-giant:active { transform: scale(0.97); }
+    .btn-giant[disabled] { opacity: 0.45; filter: grayscale(0.6); }
+    .leaflet-container { background-color: #090D16 !important; border-radius: 1rem; z-index: 10; }
+
+    @keyframes pulse-ring {
+      0%   { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+      70%  { transform: scale(1);    box-shadow: 0 0 0 18px rgba(34, 197, 94, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+    }
+    .pulse-active { animation: pulse-ring 2s infinite; }
+
+    #flechaRumbo { transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+
+    #mapaWrap.fullscreen { position: fixed; inset: 0; z-index: 9999; border-radius: 0; }
+    #mapaWrap.fullscreen #map { height: 100vh !important; }
+
+    #map {
+      width: 100% !important;
+      height: 45vh !important;
+      min-height: 320px !important;
+      background: #090D16;
+      z-index: 1;
+    }
+    #map .leaflet-tile-pane { z-index: 200; }
+    #map .leaflet-marker-pane { z-index: 600; }
+
+    #btnInstall { transition: all 0.4s ease; }
+
+    #installModal, #infoModal {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      background: rgba(9, 13, 22, 0.92);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      animation: fadeInModal 0.2s ease-out;
+    }
+    #installModal.hidden, #infoModal.hidden { display: none !important; }
+
+    @keyframes fadeInModal {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+
+    .modal-card {
+      background: #131B2E;
+      border: 3px solid #FACC15;
+      border-radius: 22px;
+      padding: 24px;
+      max-width: 440px;
+      width: 100%;
+      box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.85), 0 0 0 4px rgba(250, 204, 21, 0.08);
+      color: #E2E8F0;
+      animation: slideUpModal 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    @keyframes slideUpModal {
+      from { transform: translateY(30px) scale(0.95); opacity: 0; }
+      to   { transform: translateY(0) scale(1);      opacity: 1; }
+    }
+
+    .modal-title {
+      font-size: 1.5rem;
+      font-weight: 900;
+      color: #FACC15;
+      margin: 0 0 16px 0;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .modal-body {
+      font-size: 0.95rem;
+      line-height: 1.6;
+      color: #CBD5E1;
+      margin-bottom: 20px;
+    }
+
+    .modal-body p { margin: 8px 0; }
+    .modal-body ol { margin: 10px 0; padding-left: 22px; }
+    .modal-body li { margin: 8px 0; }
+    .modal-body b { color: #FACC15; font-weight: 800; }
+
+    .modal-close {
+      width: 100%;
+      min-height: 60px;
+      background: #334155;
+      color: #FFFFFF;
+      border: 2px solid #475569;
+      border-radius: 14px;
+      font-size: 1.1rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: inherit;
+    }
+
+    .modal-close:hover { background: #475569; border-color: #64748B; }
+    .modal-close:active { transform: scale(0.97); }
+  </style>
+</head>
+<body class="min-h-full text-slate-100 flex flex-col justify-between p-3 sm:p-6 max-w-5xl mx-auto selection:bg-yellow-400 selection:text-black">
+
+  <header class="w-full mb-4 space-y-3">
+    <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+      <div class="flex items-center gap-2">
+        <span id="badgeMode" class="bg-brand-yellow text-slate-950 text-xs sm:text-sm font-black px-3 py-1.5 rounded-full uppercase tracking-wider">
+          MODO: EMISOR (USUARIO)
+        </span>
+        <span id="badgeCloud" class="bg-slate-800 text-slate-300 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border border-slate-700">
+          <span class="w-2 h-2 rounded-full bg-slate-500" id="cloudDot"></span>
+          <span id="cloudText">Supabase</span>
+        </span>
+        <span id="badgeFix" class="bg-slate-800 text-slate-300 text-xs font-bold px-2.5 py-1 rounded-full border border-slate-700">
+          GPS: —
+        </span>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="btnInstall" onclick="abrirInstalacion()" aria-label="Instalar como aplicación"
+                style="display:none"
+                class="bg-brand-yellow hover:bg-yellow-400 text-slate-950 border-2 border-yellow-300 font-bold px-3 py-2 rounded-xl text-sm items-center gap-1">
+          📲 <span class="hidden sm:inline">Instalar App</span>
+        </button>
+        <button id="btnToggleSpeech" onclick="toggleSpeech()" aria-label="Activar o desactivar síntesis de voz"
+                class="bg-slate-800 hover:bg-slate-700 border-2 border-slate-600 text-white font-bold px-3 py-2 rounded-xl text-sm flex items-center gap-2">
+          <span id="speechIcon">🔊</span><span id="speechStatusText" class="hidden sm:inline">Voz Activada</span>
+        </button>
+        <button onclick="toggleInfoModal()" aria-label="Abrir manual"
+                class="bg-brand-blue hover:bg-blue-600 text-white font-bold px-3 py-2 rounded-xl text-sm border-2 border-blue-400">
+          ❓ <span class="hidden sm:inline">¿Cómo Funciona?</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="text-center sm:text-left">
+      <h1 class="text-3xl sm:text-5xl font-black text-brand-yellow tracking-tight">NAVVISION GPS</h1>
+      <p class="text-slate-300 text-sm sm:text-base font-medium">Asistente Accesible de Navegación Háptica y Rastreo Remoto</p>
+    </div>
+  </header>
+
+  <section class="grid grid-cols-2 gap-3 mb-4" aria-label="Selector de Modo">
+    <button id="tabEmisor" onclick="switchRole('emisor')"
+            class="py-4 px-3 rounded-2xl border-4 border-brand-yellow bg-brand-yellow text-slate-950 font-black text-base sm:text-xl">
+      📱 EMISOR<br><span class="text-xs sm:text-sm font-bold block opacity-90">(Persona Ciega)</span>
+    </button>
+    <button id="tabReceptor" onclick="switchRole('receptor')"
+            class="py-4 px-3 rounded-2xl border-4 border-slate-800 bg-slate-900 text-slate-300 font-black text-base sm:text-xl">
+      👀 RECEPTOR<br><span class="text-xs sm:text-sm font-bold block opacity-75">(Familiar / Tutor)</span>
+    </button>
+  </section>
+
+  <main class="space-y-4 flex-grow w-full">
+
+    <div id="viewEmisor" class="space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <button id="btnConnectBT" onclick="connectBluetooth()"
+                class="btn-giant bg-emerald-500 hover:bg-emerald-400 border-emerald-300 text-slate-950 rounded-2xl flex items-center justify-center gap-3 w-full">
+          <span class="text-3xl">🔌</span><span id="txtBtnBT">CONECTAR WEARABLE ESP32</span>
+        </button>
+
+        <button id="btnToggleGPS" onclick="toggleGPSTracking()"
+                class="btn-giant bg-brand-yellow hover:bg-yellow-300 border-yellow-200 text-slate-950 rounded-2xl flex items-center justify-center gap-3 w-full">
+          <span class="text-3xl">📍</span><span id="textBtnGPS">INICIAR TRANSMISIÓN GPS</span>
+        </button>
+      </div>
+
+      <div id="panelEstadoGPS" class="bg-brand-card border-2 border-slate-800 rounded-2xl p-4 hidden">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2">
+            <span class="text-[11px] text-slate-400 block font-bold">PRECISIÓN</span>
+            <span id="gpsPrecision" class="text-lg font-black text-emerald-400">—</span>
+          </div>
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2">
+            <span class="text-[11px] text-slate-400 block font-bold">VELOCIDAD</span>
+            <span id="gpsVelocidad" class="text-lg font-black text-emerald-400">—</span>
+          </div>
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2">
+            <span class="text-[11px] text-slate-400 block font-bold">RUMBO</span>
+            <span id="gpsRumbo" class="text-lg font-black text-emerald-400">—</span>
+          </div>
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2">
+            <span class="text-[11px] text-slate-400 block font-bold">ÚLTIMO ENVÍO</span>
+            <span id="gpsUltimoEnvio" class="text-lg font-black text-slate-400">—</span>
+          </div>
+        </div>
+        <p id="gpsAviso" class="text-xs text-amber-400 font-bold mt-3 text-center"></p>
+      </div>
+
+      <div class="bg-brand-card border-2 border-slate-800 rounded-2xl p-4 text-center space-y-3">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+          <h3 class="text-slate-300 text-xs sm:text-sm font-bold uppercase tracking-wider">Sensores Láser de Proximidad</h3>
+          <span id="btStatus" class="text-xs font-bold text-amber-400 bg-amber-950/60 border border-amber-800 px-2.5 py-1 rounded-md">Desconectado</span>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <div id="cardIzq" class="bg-slate-950 border border-slate-800 p-3 rounded-xl">
+            <span class="text-xs text-slate-400 block font-bold">IZQUIERDA</span>
+            <span id="distIzq" class="text-xl sm:text-3xl font-black text-emerald-400">-- mm</span>
+          </div>
+          <div id="cardCen" class="bg-slate-950 border border-slate-800 p-3 rounded-xl">
+            <span class="text-xs text-slate-400 block font-bold">CENTRO</span>
+            <span id="distCen" class="text-xl sm:text-3xl font-black text-emerald-400">-- mm</span>
+          </div>
+          <div id="cardDer" class="bg-slate-950 border border-slate-800 p-3 rounded-xl">
+            <span class="text-xs text-slate-400 block font-bold">DERECHA</span>
+            <span id="distDer" class="text-xl sm:text-3xl font-black text-emerald-400">-- mm</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-brand-card border-2 border-slate-800 rounded-2xl p-4">
+        <h3 class="text-slate-300 text-xs font-bold uppercase tracking-wider mb-2">Código para el Receptor</h3>
+        <div class="flex items-center gap-2">
+          <span id="codigoVinculo" class="flex-1 bg-slate-950 border-2 border-slate-700 rounded-xl px-4 py-3 text-2xl font-black tracking-[0.3em] text-center text-brand-yellow select-all">------</span>
+          <button onclick="copiarCodigo()" class="btn-giant !min-h-0 py-3 px-4 bg-slate-800 hover:bg-slate-700 border-slate-600 text-white rounded-xl text-base">📋</button>
+        </div>
+        <p class="text-[11px] text-slate-500 mt-2 text-center">Este código se envía al ESP32 al conectar el Bluetooth.</p>
+      </div>
+    </div>
+
+    <div id="viewReceptor" class="space-y-4 hidden">
+      <div class="bg-brand-card border-2 border-slate-800 rounded-2xl p-4">
+        <h3 class="text-slate-300 text-xs font-bold uppercase tracking-wider mb-2">Código del Emisor</h3>
+        <div class="flex items-center gap-2 mb-3">
+          <input id="inputCodigo" type="text" maxlength="6" placeholder="ABC123"
+                 class="flex-1 bg-slate-950 border-2 border-slate-700 rounded-xl px-4 py-3 text-2xl font-black tracking-[0.3em] text-center text-brand-yellow uppercase">
+          <button onclick="conectarAlEmisor()" class="btn-giant !min-h-0 py-3 px-4 bg-brand-green hover:bg-green-500 border-green-300 text-slate-950 rounded-xl text-base font-black">▶</button>
+        </div>
+      </div>
+
+      <div class="bg-brand-card border-2 border-slate-800 rounded-2xl p-4">
+        <div class="flex items-center gap-4">
+          <div id="flechaRumbo" class="text-6xl leading-none shrink-0" aria-hidden="true">🧭</div>
+          <div class="flex-1 min-w-0">
+            <p id="txtDistancia" class="text-3xl sm:text-4xl font-black text-brand-yellow leading-tight">Sin datos</p>
+            <p id="txtDireccion" class="text-sm sm:text-base font-bold text-slate-300">Esperando señal del emisor…</p>
+          </div>
+          <button id="btnSeguir" onclick="toggleFollow()"
+                  class="shrink-0 bg-brand-blue hover:bg-blue-600 border-2 border-blue-400 text-white font-bold px-3 py-3 rounded-xl text-sm">
+            🎯<br><span id="txtSeguir" class="text-[10px]">SEGUIR</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 mt-3 text-center">
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2">
+            <span class="text-[11px] text-slate-400 block font-bold">EMISOR</span>
+            <span id="rxPrecisionEmisor" class="text-sm font-black text-emerald-400">—</span>
+          </div>
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2">
+            <span class="text-[11px] text-slate-400 block font-bold">TU GPS</span>
+            <span id="rxPrecisionPropia" class="text-sm font-black text-blue-400">—</span>
+          </div>
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-2">
+            <span class="text-[11px] text-slate-400 block font-bold">ACTUALIZADO</span>
+            <span id="rxActualizado" class="text-sm font-black text-slate-400">—</span>
+          </div>
+        </div>
+        <p id="rxAviso" class="text-xs text-amber-400 font-bold mt-2 text-center"></p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <button onclick="centrarEnEmisor()" class="btn-giant bg-brand-yellow hover:bg-yellow-300 border-yellow-200 text-slate-950 rounded-2xl flex items-center justify-center gap-3">
+          <span class="text-3xl">📡</span><span>VER AL USUARIO</span>
+        </button>
+        <button onclick="centrarEnMi()" class="btn-giant bg-brand-blue hover:bg-blue-600 border-blue-400 text-white rounded-2xl flex items-center justify-center gap-3">
+          <span class="text-3xl">🙋</span><span>VER MI POSICIÓN</span>
+        </button>
+      </div>
+
+      <div id="mapaWrap" class="relative bg-brand-card border-2 border-slate-800 rounded-2xl overflow-hidden">
+        <div id="map" class="w-full" style="height: 45vh; min-height: 320px;"></div>
+        <button onclick="toggleFullscreenMapa()" aria-label="Pantalla completa"
+                class="absolute top-2 right-2 z-[500] bg-slate-900/90 hover:bg-slate-800 border-2 border-slate-600 text-white font-bold w-11 h-11 rounded-xl">
+          ⛶
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <div id="installModal" class="hidden">
+    <div class="modal-card">
+      <h3 class="modal-title">📲 Instalar NavVision</h3>
+      <div id="installInstructions" class="modal-body"></div>
+      <button onclick="cerrarInstalacion()" class="modal-close">CERRAR</button>
+    </div>
+  </div>
+
+  <div id="infoModal" class="hidden">
+    <div class="modal-card">
+      <h3 class="modal-title">❓ ¿Cómo Funciona NavVision?</h3>
+      <div class="modal-body space-y-2">
+        <p><b>1. Modo Emisor:</b> La persona ciega lleva el móvil y el wearable ESP32 con sensor ultrasónico conectados por Bluetooth.</p>
+        <p><b>2. Conexión ESP32:</b> Pulsa "CONECTAR WEARABLE ESP32". Busca el dispositivo llamado <b>NavVision-ESP32</b>. Al conectar, el código de sesión se sincroniza automáticamente.</p>
+        <p><b>3. Rastreo GPS:</b> Transmite la posición en tiempo real hacia Supabase para que el tutor la vea en el mapa.</p>
+        <p><b>4. Receptor:</b> Introduce el código de 6 caracteres para seguir al emisor en el mapa.</p>
+      </div>
+      <button onclick="toggleInfoModal()" class="modal-close">ENTENDIDO</button>
+    </div>
+  </div>
+
+  <footer class="mt-6 pt-4 border-t border-slate-800 text-center text-xs text-slate-500 font-medium">
+    NavVision GPS · Requiere HTTPS para geolocalización y Bluetooth · <span id="footVersion">v3.3</span>
+  </footer>
+
+  <script>
+    /* ============================================================
+        CONFIGURACIÓN DE SUPABASE
+       ============================================================ */
+    var SUPABASE_URL = 'https://qwppictwjwkvhcomrcxl.supabase.co';
+    var SUPABASE_ANON_KEY = 'sb_publishable_fjr4sn0EUZbphZMODoOCFQ_keOisbZD';
+
+    var supabaseClient = null;
+    try {
+      supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      console.log('[Supabase] Cliente inicializado');
+    } catch (e) {
+      console.error('[Supabase] Error al inicializar:', e);
+    }
+
+    /* ============================================================
+        BLUETOOTH WEB (ESP32) — v2 corregido
+       ============================================================ */
+    let btDevice = null;
+    let btCharacteristic = null;
+    let btRxCharacteristic = null;
+    let bluetoothBuffer = "";
+    let nombreDispositivoBT = "";
+
+    // UUIDs del servicio UART Nordic
+    const BLE_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    const BLE_TX_UUID      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // ESP32 → Web
+    const BLE_RX_UUID      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // Web → ESP32
+
+    // Nombre que debe anunciar el ESP32
+    const NOMBRE_ESPERADO_ESP32 = "NavVision-ESP32";
+
+    async function connectBluetooth() {
+      if (!('navigator' in window) || !('bluetooth' in navigator)) {
+        alert("Tu navegador no soporta Web Bluetooth. Usa Google Chrome o Edge.");
+        hablar("Tu navegador no soporta Bluetooth Web", true);
+        return;
+      }
+
+      try {
+        setBadgeBT('conectando', 'Buscando ESP32…');
+        hablar("Buscando dispositivo " + NOMBRE_ESPERADO_ESP32);
+
+        btDevice = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: "NavVision" }],
+          optionalServices: [BLE_SERVICE_UUID]
+        });
+
+        nombreDispositivoBT = btDevice.name || "ESP32 sin nombre";
+        console.log("[BT] Dispositivo seleccionado:", nombreDispositivoBT);
+
+        btDevice.addEventListener('gattserverdisconnected', onBluetoothDisconnected);
+
+        const server = await btDevice.gatt.connect();
+        const service = await server.getPrimaryService(BLE_SERVICE_UUID);
+
+        btCharacteristic = await service.getCharacteristic(BLE_TX_UUID);
+
+        try {
+          btRxCharacteristic = await service.getCharacteristic(BLE_RX_UUID);
+        } catch (e) {
+          console.warn("[BT] Sin característica RX (solo lectura)");
+          btRxCharacteristic = null;
+        }
+
+        await btCharacteristic.startNotifications();
+        btCharacteristic.addEventListener('characteristicvaluechanged', handleBluetoothData);
+
+        setBadgeBT('conectado', '✔ ' + nombreDispositivoBT);
+        document.getElementById('txtBtnBT').textContent = nombreDispositivoBT.toUpperCase();
+        hablar("Conectado a " + nombreDispositivoBT, true);
+
+        // Si ya tenemos código de sesión, enviarlo al ESP32
+        if (GPS.codigo && btRxCharacteristic) {
+          enviarCodigoAlESP32(GPS.codigo);
+        }
+
+      } catch (error) {
+        console.error("[Bluetooth] Error:", error);
+        setBadgeBT('desconectado', 'Desconectado');
+        hablar("No se pudo conectar al ESP32", true);
+      }
+    }
+
+    async function enviarCodigoAlESP32(codigo) {
+      if (!btRxCharacteristic) return;
+      try {
+        const encoder = new TextEncoder();
+        await btRxCharacteristic.writeValue(encoder.encode("SYNC:" + codigo + "\n"));
+        console.log("[BT] Código enviado al ESP32:", codigo);
+      } catch (e) {
+        console.warn("[BT] No se pudo enviar código:", e);
+      }
+    }
+
+    function onBluetoothDisconnected() {
+      setBadgeBT('desconectado', 'Desconectado');
+      document.getElementById('txtBtnBT').textContent = "CONECTAR WEARABLE ESP32";
+      hablar("Se perdió la conexión con el ESP32", true);
+      try { btCharacteristic.stopNotifications(); } catch (e) {}
+      btCharacteristic = null;
+      btRxCharacteristic = null;
+    }
+
+    function handleBluetoothData(event) {
+      const value = event.target.value;
+      const decoder = new TextDecoder('utf-8');
+      const chunk = decoder.decode(value);
+
+      bluetoothBuffer += chunk;
+      let lines = bluetoothBuffer.split('\n');
+      bluetoothBuffer = lines.pop();
+
+      for (let line of lines) {
+        parsearDatosESP32(line.trim());
+      }
+    }
+
+    function parsearDatosESP32(dataStr) {
+      if (!dataStr) return;
+      try {
+        if (dataStr.startsWith('{')) {
+          let datos = JSON.parse(dataStr);
+
+          if (datos.dev && datos.dev !== nombreDispositivoBT) {
+            nombreDispositivoBT = datos.dev;
+            setBadgeBT('conectado', '✔ ' + datos.dev);
+          }
+
+          if (datos.sync && !GPS.codigo) {
+            GPS.codigo = datos.sync;
+            document.getElementById('codigoVinculo').textContent = datos.sync;
+            console.log("[BT] Código recibido del ESP32:", datos.sync);
+          }
+
+          actualizarUIldistancias(datos.izq, datos.cen, datos.der);
+        } else {
+          let partes = dataStr.split(',');
+          if (partes.length >= 3) {
+            actualizarUIldistancias(
+              parseInt(partes[0]) || 0,
+              parseInt(partes[1]) || 0,
+              parseInt(partes[2]) || 0
+            );
+          }
+        }
+      } catch (e) {
+        console.warn("[Bluetooth] Trama inválida:", dataStr, e);
+      }
+    }
+
+    let ultimaAlerta = 0;
+    function actualizarUIldistancias(izq, cen, der) {
+      document.getElementById('distIzq').textContent = izq + " mm";
+      document.getElementById('distCen').textContent = cen + " mm";
+      document.getElementById('distDer').textContent = der + " mm";
+
+      document.getElementById('cardIzq').className = 'bg-slate-950 border p-3 rounded-xl ' +
+        (izq < 300 ? 'border-red-500' : 'border-slate-800');
+      document.getElementById('cardCen').className = 'bg-slate-950 border p-3 rounded-xl ' +
+        (cen < 300 ? 'border-red-500' : 'border-slate-800');
+      document.getElementById('cardDer').className = 'bg-slate-950 border p-3 rounded-xl ' +
+        (der < 300 ? 'border-red-500' : 'border-slate-800');
+
+      const ahora = Date.now();
+      if (ahora - ultimaAlerta < 2500) return;
+
+      if (cen > 0 && cen < 300) {
+        hablar("Cuidado al frente, obstáculo a " + milimetrosATexto(cen), true);
+        ultimaAlerta = ahora;
+      } else if (izq > 0 && izq < 200) {
+        hablar("Obstáculo a la izquierda");
+        ultimaAlerta = ahora;
+      } else if (der > 0 && der < 200) {
+        hablar("Obstáculo a la derecha");
+        ultimaAlerta = ahora;
+      }
+    }
+
+    function milimetrosATexto(mm) {
+      return " " + Math.round(mm / 10) + " centímetros";
+    }
+
+    function setBadgeBT(estado, texto) {
+      var badge = document.getElementById('btStatus');
+      if (!badge) return;
+      if (estado === 'conectado') {
+        badge.className = 'text-xs font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800 px-2.5 py-1 rounded-md';
+      } else if (estado === 'conectando') {
+        badge.className = 'text-xs font-bold text-amber-400 bg-amber-950/60 border border-amber-800 px-2.5 py-1 rounded-md';
+      } else {
+        badge.className = 'text-xs font-bold text-red-400 bg-red-950/60 border border-red-800 px-2.5 py-1 rounded-md';
+      }
+      badge.textContent = texto;
+    }
+
+    /* ============================================================
+        UTILIDADES GEOGRÁFICAS
+       ============================================================ */
+    var R_TIERRA = 6371000;
+    function aRad(d) { return d * Math.PI / 180; }
+    function aDeg(r) { return r * 180 / Math.PI; }
+
+    function distanciaMetros(a, b) {
+      if (!a || !b) return null;
+      var dLat = aRad(b.lat - a.lat);
+      var dLon = aRad(b.lng - a.lng);
+      var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(aRad(a.lat)) * Math.cos(aRad(b.lat)) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      return 2 * R_TIERRA * Math.asin(Math.min(1, Math.sqrt(h)));
+    }
+
+    function rumboGrados(a, b) {
+      if (!a || !b) return null;
+      var y = Math.sin(aRad(b.lng - a.lng)) * Math.cos(aRad(b.lat));
+      var x = Math.cos(aRad(a.lat)) * Math.sin(aRad(b.lat)) -
+              Math.sin(aRad(a.lat)) * Math.cos(aRad(b.lat)) *
+              Math.cos(aRad(b.lng - a.lng));
+      return (aDeg(Math.atan2(y, x)) + 360) % 360;
+    }
+
+    var PUNTOS_CARDINALES = ['norte', 'noreste', 'este', 'sureste', 'sur', 'suroeste', 'oeste', 'noroeste'];
+    function cardinal(rumbo) {
+      if (rumbo == null) return '';
+      return PUNTOS_CARDINALES[Math.round(rumbo / 45) % 8];
+    }
+
+    function formatDistancia(m) {
+      if (m == null) return '—';
+      if (m < 10) return 'a menos de 10 metros';
+      if (m < 1000) return 'a ' + (Math.round(m / 10) * 10) + ' metros';
+      return 'a ' + (m / 1000).toFixed(m < 10000 ? 2 : 1) + ' kilómetros';
+    }
+
+    function formatHace(ts) {
+      if (!ts) return '—';
+      var s = Math.round((Date.now() - ts) / 1000);
+      if (s < 5) return 'ahora';
+      if (s < 60) return 'hace ' + s + ' s';
+      if (s < 3600) return 'hace ' + Math.round(s / 60) + ' min';
+      return 'hace ' + Math.round(s / 3600) + ' h';
+    }
+
+    /* ============================================================
+        ESTADO GLOBAL
+       ============================================================ */
+    var GPS = {
+      cfg: {
+        opcionesAlta: { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
+        minDistPublicar: 15,
+        maxIntervaloLatido: 45000,
+        maxPrecisionPublicar: 150
+      },
+      emisor: {
+        watchId: null, pos: null,
+        activo: false
+      },
+      receptor: {
+        pos: null,
+        ultimoEmisor: null,
+        tsEmisor: 0
+      },
+      follow: true,
+      codigo: null
+    };
+
+    /* ============================================================
+        VOZ
+       ============================================================ */
+    window.vozActiva = true;
+    window.hablar = function (texto, urgente) {
+      if (urgente === undefined) urgente = false;
+      if (!window.vozActiva || !('speechSynthesis' in window)) return;
+      try {
+        speechSynthesis.cancel();
+        var u = new SpeechSynthesisUtterance(texto);
+        u.lang = 'es-ES';
+        u.rate = urgente ? 1.15 : 1.0;
+        speechSynthesis.speak(u);
+      } catch (e) {}
+    };
+
+    window.toggleSpeech = function () {
+      window.vozActiva = !window.vozActiva;
+      var icon = document.getElementById('speechIcon');
+      var txt = document.getElementById('speechStatusText');
+      if (icon) icon.textContent = window.vozActiva ? '🔊' : '🔇';
+      if (txt) txt.textContent = window.vozActiva ? 'Voz Activada' : 'Voz Silenciada';
+      if (window.vozActiva) hablar('Voz activada');
+    };
+
+    /* ============================================================
+        UI HELPERS Y MODALES
+       ============================================================ */
+    function setBadgeFix(estado, detalle) {
+      var el = document.getElementById('badgeFix');
+      if (!el) return;
+      var estilos = {
+        off:   ['bg-slate-800 text-slate-300 border-slate-700',        'GPS: —'],
+        busca: ['bg-amber-950 text-amber-300 border-amber-700',        'GPS: buscando…'],
+        ok:    ['bg-emerald-950 text-emerald-300 border-emerald-700',  'GPS: ±' + detalle + ' m'],
+        debil: ['bg-orange-950 text-orange-300 border-orange-700',     'GPS: débil ±' + detalle + ' m'],
+        error: ['bg-red-950 text-red-300 border-red-700',              'GPS: error']
+      };
+      var e = estilos[estado] || estilos.off;
+      el.className = 'text-xs font-bold px-2.5 py-1 rounded-full border ' + e[0];
+      el.textContent = e[1];
+    }
+
+    function setBadgeCloud(estado, texto) {
+      var dot = document.getElementById('cloudDot');
+      var txt = document.getElementById('cloudText');
+      if (!dot || !txt) return;
+      var colores = { ok: 'bg-emerald-400', error: 'bg-red-500', off: 'bg-slate-500', wait: 'bg-amber-400' };
+      dot.className = 'w-2 h-2 rounded-full ' + (colores[estado] || colores.off);
+      txt.textContent = texto;
+    }
+
+    function avisoGPS(msg, tipo) {
+      if (!tipo) tipo = 'info';
+      ['gpsAviso', 'rxAviso'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = msg || '';
+        el.className = 'text-xs font-bold mt-2 text-center ' +
+          (tipo === 'error' ? 'text-red-400' : tipo === 'ok' ? 'text-emerald-400' : 'text-amber-400');
+      });
+    }
+
+    function generarCodigo() {
+      var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      var res = '';
+      for (var i = 0; i < 6; i++) {
+        res += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return res;
+    }
+
+    function copiarCodigo() {
+      var codigo = document.getElementById('codigoVinculo').textContent;
+      navigator.clipboard.writeText(codigo).then(function() {
+        hablar("Código copiado al portapapeles");
+      });
+    }
+
+    function toggleInfoModal() {
+      var modal = document.getElementById('infoModal');
+      modal.classList.toggle('hidden');
+    }
+
+    function abrirInstalacion() {
+      document.getElementById('installModal').classList.remove('hidden');
+    }
+
+    function cerrarInstalacion() {
+      document.getElementById('installModal').classList.add('hidden');
+    }
+
+    function switchRole(role) {
+      var btnEmisor = document.getElementById('tabEmisor');
+      var btnReceptor = document.getElementById('tabReceptor');
+      var viewEmisor = document.getElementById('viewEmisor');
+      var viewReceptor = document.getElementById('viewReceptor');
+      var badgeMode = document.getElementById('badgeMode');
+
+      if (role === 'emisor') {
+        btnEmisor.className = 'py-4 px-3 rounded-2xl border-4 border-brand-yellow bg-brand-yellow text-slate-950 font-black text-base sm:text-xl';
+        btnReceptor.className = 'py-4 px-3 rounded-2xl border-4 border-slate-800 bg-slate-900 text-slate-300 font-black text-base sm:text-xl';
+        viewEmisor.classList.remove('hidden');
+        viewReceptor.classList.add('hidden');
+        badgeMode.textContent = 'MODO: EMISOR (USUARIO)';
+        hablar("Modo emisor activado");
+      } else {
+        btnReceptor.className = 'py-4 px-3 rounded-2xl border-4 border-brand-yellow bg-brand-yellow text-slate-950 font-black text-base sm:text-xl';
+        btnEmisor.className = 'py-4 px-3 rounded-2xl border-4 border-slate-800 bg-slate-900 text-slate-300 font-black text-base sm:text-xl';
+        viewReceptor.classList.remove('hidden');
+        viewEmisor.classList.add('hidden');
+        badgeMode.textContent = 'MODO: RECEPTOR (TUTOR)';
+        hablar("Modo receptor activado");
+        setTimeout(function() { if (window.mapaLeaflet) window.mapaLeaflet.invalidateSize(); }, 200);
+        iniciarGPSReceptor();
+      }
+    }
+
+    /* ============================================================
+        SUPABASE
+       ============================================================ */
+    function publicarEstado(estado) {
+      if (!supabaseClient || !GPS.codigo) return;
+      supabaseClient.from('navvision_sessions').upsert({
+        codigo: GPS.codigo,
+        estado: estado,
+        updated_at: new Date()
+      }).then(function() {});
+    }
+
+    function publicarPosicion(actual) {
+      if (!supabaseClient || !GPS.codigo) return;
+      setBadgeCloud('wait', 'Enviando…');
+      supabaseClient.from('navvision_sessions').upsert({
+        codigo: GPS.codigo,
+        lat: actual.lat,
+        lng: actual.lng,
+        precision: actual.precision,
+        velocidad: actual.velocidad,
+        rumbo: actual.rumbo,
+        updated_at: new Date()
+      }).then(function(res) {
+        if (res.error) {
+          setBadgeCloud('error', 'Error Cloud');
+        } else {
+          setBadgeCloud('ok', 'Supabase');
+        }
+      });
+    }
+
+    function conectarAlEmisor() {
+      var inp = document.getElementById('inputCodigo');
+      var cod = inp.value.trim().toUpperCase();
+      if (cod.length !== 6) {
+        alert("Introduce un código válido de 6 caracteres.");
+        return;
+      }
+      GPS.codigo = cod;
+      iniciarReceptorSupabase();
+      hablar("Conectado al emisor " + cod, true);
+    }
+
+    function iniciarReceptorSupabase() {
+      if (!supabaseClient) return;
+      if (window._rxInterval) clearInterval(window._rxInterval);
+      window._rxInterval = setInterval(function() {
+        if (!GPS.codigo) return;
+        supabaseClient.from('navvision_sessions').select('*').eq('codigo', GPS.codigo).single()
+        .then(function(response) {
+          var data = response.data;
+          if (data && data.lat) {
+            actualizarReceptorDatos({
+              lat: data.lat,
+              lng: data.lng,
+              precision: data.precision,
+              rumbo: data.rumbo,
+              timestamp: new Date(data.updated_at).getTime()
+            });
+          }
+        });
+      }, 3000);
+    }
+
+    function actualizarReceptorDatos(pos) {
+      GPS.receptor.ultimoEmisor = pos;
+      GPS.receptor.tsEmisor = pos.timestamp;
+
+      document.getElementById('rxPrecisionEmisor').textContent = '±' + Math.round(pos.precision || 0) + ' m';
+      document.getElementById('rxActualizado').textContent = formatHace(pos.timestamp);
+      document.getElementById('txtDistancia').textContent = formatDistancia(distanciaMetros(GPS.receptor.pos, pos));
+
+      if (GPS.receptor.pos) {
+        var rumbo = rumboGrados(GPS.receptor.pos, pos);
+        document.getElementById('txtDireccion').textContent = 'Dirección: ' + cardinal(rumbo);
+        document.getElementById('flechaRumbo').style.transform = 'rotate(' + rumbo + 'deg)';
+      }
+
+      if (window.marcadorEmisor && window.mapaLeaflet) {
+        window.marcadorEmisor.setLatLng([pos.lat, pos.lng]);
+        if (GPS.follow) {
+          window.mapaLeaflet.setView([pos.lat, pos.lng]);
+        }
+      }
+    }
+
+    function toggleFollow() {
+      GPS.follow = !GPS.follow;
+      var txt = document.getElementById('txtSeguir');
+      txt.textContent = GPS.follow ? 'SEGUIR' : 'LIBRE';
+      hablar(GPS.follow ? "Modo seguir activado" : "Modo libre activado");
+    }
+
+    function centrarEnEmisor() {
+      if (GPS.receptor.ultimoEmisor && window.mapaLeaflet) {
+        window.mapaLeaflet.setView([GPS.receptor.ultimoEmisor.lat, GPS.receptor.ultimoEmisor.lng], 16);
+      }
+    }
+
+    function centrarEnMi() {
+      if (GPS.receptor.pos && window.mapaLeaflet) {
+        window.mapaLeaflet.setView([GPS.receptor.pos.lat, GPS.receptor.pos.lng], 16);
+      }
+    }
+
+    function toggleFullscreenMapa() {
+      var wrap = document.getElementById('mapaWrap');
+      wrap.classList.toggle('fullscreen');
+      setTimeout(function() { if (window.mapaLeaflet) window.mapaLeaflet.invalidateSize(); }, 200);
+    }
+
+    /* ============================================================
+        MAPA LEAFLET
+       ============================================================ */
+    document.addEventListener("DOMContentLoaded", function() {
+      if (document.getElementById('map')) {
+        window.mapaLeaflet = L.map('map', { zoomControl: false }).setView([40.4168, -3.7038], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '© OpenStreetMap'
+        }).addTo(window.mapaLeaflet);
+
+        window.marcadorEmisor = L.marker([40.4168, -3.7038]).addTo(window.mapaLeaflet);
+      }
+    });
+
+    function actualizarMapaEmisor(actual) {
+      if (window.mapaLeaflet && window.marcadorEmisor) {
+        window.marcadorEmisor.setLatLng([actual.lat, actual.lng]);
+        window.mapaLeaflet.setView([actual.lat, actual.lng]);
+      }
+    }
+
+    /* ============================================================
+        GPS EMISOR
+       ============================================================ */
+    function toggleGPSTracking() {
+      if (GPS.emisor.activo) {
+        detenerEmisor();
+      } else {
+        iniciarEmisor();
+      }
+    }
+
+    function iniciarEmisor() {
+      if (!('geolocation' in navigator)) {
+        alert("Geolocalización no soportada en este dispositivo.");
+        return;
+      }
+      if (!GPS.codigo) {
+        GPS.codigo = generarCodigo();
+        document.getElementById('codigoVinculo').textContent = GPS.codigo;
+        // Sincronizar código con el ESP32 si está conectado
+        if (btRxCharacteristic) enviarCodigoAlESP32(GPS.codigo);
+      }
+      GPS.emisor.activo = true;
+      document.getElementById('panelEstadoGPS').classList.remove('hidden');
+      document.getElementById('textBtnGPS').textContent = "DETENER TRANSMISIÓN GPS";
+      document.getElementById('btnToggleGPS').classList.add('pulse-active');
+      setBadgeFix('busca');
+      hablar("Transmisión GPS iniciada", true);
+
+      GPS.emisor.watchId = navigator.geolocation.watchPosition(function(pos) {
+        var actual = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          precision: pos.coords.accuracy,
+          velocidad: pos.coords.speed,
+          rumbo: pos.coords.heading,
+          timestamp: pos.timestamp
+        };
+        GPS.emisor.pos = actual;
+
+        document.getElementById('gpsPrecision').textContent = '±' + Math.round(actual.precision) + ' m';
+        document.getElementById('gpsVelocidad').textContent = actual.velocidad ? (actual.velocidad * 3.6).toFixed(1) + ' km/h' : '0 km/h';
+        document.getElementById('gpsRumbo').textContent = actual.rumbo ? Math.round(actual.rumbo) + '°' : '—';
+        document.getElementById('gpsUltimoEnvio').textContent = 'ahora';
+
+        setBadgeFix('ok', Math.round(actual.precision));
+        actualizarMapaEmisor(actual);
+        publicarPosicion(actual);
+      }, function(err) {
+        console.error(err);
+        setBadgeFix('error');
+        avisoGPS("Error GPS: " + err.message, 'error');
+      }, GPS.cfg.opcionesAlta);
+
+      publicarEstado('online');
+    }
+
+    function detenerEmisor() {
+      GPS.emisor.activo = false;
+      if (GPS.emisor.watchId !== null) {
+        navigator.geolocation.clearWatch(GPS.emisor.watchId);
+        GPS.emisor.watchId = null;
+      }
+      document.getElementById('textBtnGPS').textContent = "INICIAR TRANSMISIÓN GPS";
+      document.getElementById('btnToggleGPS').classList.remove('pulse-active');
+      setBadgeFix('off');
+      publicarEstado('offline');
+      hablar("Transmisión GPS detenida");
+    }
+
+    /* ============================================================
+        GPS RECEPTOR
+       ============================================================ */
+    function iniciarGPSReceptor() {
+      if (!('geolocation' in navigator)) return;
+      if (GPS.receptor.pos) return;
+
+      navigator.geolocation.watchPosition(function(pos) {
+        GPS.receptor.pos = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
+        };
+        document.getElementById('rxPrecisionPropia').textContent = '±' + Math.round(pos.coords.accuracy) + ' m';
+
+        if (window.mapaLeaflet && window.miMarcador) {
+          window.miMarcador.setLatLng([GPS.receptor.pos.lat, GPS.receptor.pos.lng]);
+        } else if (window.mapaLeaflet) {
+          window.miMarcador = L.circleMarker([GPS.receptor.pos.lat, GPS.receptor.pos.lng], {
+            color: '#3B82F6', radius: 8, fillOpacity: 1
+          }).addTo(window.mapaLeaflet);
+        }
+      }, function(err) {
+        console.warn("GPS receptor:", err);
+      }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+    }
+  </script>
+</body>
+</html>
